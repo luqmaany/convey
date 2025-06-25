@@ -48,7 +48,7 @@ class GameSettingsState extends ConsumerState<GameSettings> {
       return;
     }
     final seconds = int.tryParse(value);
-    final isValid = seconds != null && seconds >= 10 && seconds <= 120;
+    final isValid = seconds != null && seconds >= 1 && seconds <= 120;
     if (mounted) {
       ref.read(settingsValidationProvider.notifier).setRoundTimeValid(isValid);
       if (isValid) {
@@ -63,7 +63,7 @@ class GameSettingsState extends ConsumerState<GameSettings> {
       return;
     }
     final score = int.tryParse(value);
-    final isValid = score != null && score >= 10 && score <= 100;
+    final isValid = score != null && score >= 1 && score <= 100;
     if (mounted) {
       ref
           .read(settingsValidationProvider.notifier)
