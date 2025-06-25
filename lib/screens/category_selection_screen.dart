@@ -162,6 +162,29 @@ class _CategorySelectionScreenState
   @override
   Widget build(BuildContext context) {
     final currentTeamPlayers = ref.watch(currentTeamPlayersProvider);
+    final gameState = ref.watch(gameStateProvider);
+    final isTiebreaker = gameState?.isTiebreaker ?? false;
+    final tiebreakerCategory = gameState?.tiebreakerCategory;
+
+    // If in tiebreaker and category is already set, skip spinner and go to role assignment
+    if (isTiebreaker && tiebreakerCategory != null) {
+      // Use a post-frame callback to avoid setState during build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => RoleAssignmentScreen(
+              teamIndex: widget.teamIndex,
+              roundNumber: widget.roundNumber,
+              turnNumber: widget.turnNumber,
+              category: tiebreakerCategory,
+            ),
+          ),
+        );
+      });
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Scaffold(
       body: SafeArea(
@@ -253,6 +276,10 @@ class _CategorySelectionScreenState
                         color: teamColors[2], // Green
                         onPressed: _selectedCategory != null
                             ? () {
+                                if (isTiebreaker && tiebreakerCategory == null) {
+                                  // Set the tiebreaker category for this round
+                                  ref.read(gameStateProvider.notifier).setTiebreakerCategory(_selectedCategory!);
+                                }
                                 Navigator.of(context).push(
                                   MaterialPageRoute(
                                     builder: (context) => RoleAssignmentScreen(
@@ -328,4 +355,221 @@ Widget _buildTeamColorButton({
       ),
     ),
   );
+}
+
+class TiebreakerCategorySelectionScreen extends ConsumerStatefulWidget {
+  final int roundNumber;
+  final List<int> tiebreakerTeams;
+  const TiebreakerCategorySelectionScreen({
+    Key? key,
+    required this.roundNumber,
+    required this.tiebreakerTeams,
+  }) : super(key: key);
+
+  @override
+  ConsumerState<TiebreakerCategorySelectionScreen> createState() => _TiebreakerCategorySelectionScreenState();
+}
+
+class _TiebreakerCategorySelectionScreenState extends ConsumerState<TiebreakerCategorySelectionScreen> with TickerProviderStateMixin {
+  late AnimationController _scaleController;
+  late Animation<double> _scaleAnimation;
+  bool _isSpinning = false;
+  WordCategory? _selectedCategory;
+  String _currentCategory = '';
+  Timer? _categoryTimer;
+  int _spinCount = 0;
+  static const int _totalSpins = 30;
+  static const int _initialDelay = 25;
+  static const int _finalDelay = 120;
+
+  @override
+  void initState() {
+    super.initState();
+    _scaleController = AnimationController(
+      duration: const Duration(milliseconds: 150),
+      vsync: this,
+    );
+    _scaleAnimation = Tween<double>(
+      begin: 1.0,
+      end: 0.95,
+    ).animate(CurvedAnimation(
+      parent: _scaleController,
+      curve: Curves.easeInOut,
+    ));
+  }
+
+  @override
+  void dispose() {
+    _scaleController.dispose();
+    _categoryTimer?.cancel();
+    super.dispose();
+  }
+
+  String _getCategoryName(WordCategory category) {
+    switch (category) {
+      case WordCategory.person:
+        return 'Person';
+      case WordCategory.action:
+        return 'Action';
+      case WordCategory.world:
+        return 'World';
+      case WordCategory.random:
+        return 'Random';
+    }
+  }
+
+  Color _getCategoryColor(WordCategory category) {
+    switch (category) {
+      case WordCategory.person:
+        return Colors.blue;
+      case WordCategory.action:
+        return Colors.green;
+      case WordCategory.world:
+        return Colors.orange;
+      case WordCategory.random:
+        return Colors.purple;
+    }
+  }
+
+  WordCategory _getCategoryFromName(String categoryName) {
+    switch (categoryName) {
+      case 'Person':
+        return WordCategory.person;
+      case 'Action':
+        return WordCategory.action;
+      case 'World':
+        return WordCategory.world;
+      case 'Random':
+        return WordCategory.random;
+      default:
+        return WordCategory.person;
+    }
+  }
+
+  void _spinCategories() {
+    if (_isSpinning) return;
+    setState(() {
+      _isSpinning = true;
+      _selectedCategory = null;
+      _spinCount = 0;
+    });
+    _scaleController.forward().then((_) => _scaleController.reverse());
+    void updateCategory() {
+      if (_spinCount >= _totalSpins) {
+        _categoryTimer?.cancel();
+        final finalCategory = WordCategory.values[DateTime.now().millisecondsSinceEpoch % WordCategory.values.length];
+        setState(() {
+          _isSpinning = false;
+          _selectedCategory = finalCategory;
+          _currentCategory = _getCategoryName(finalCategory);
+        });
+        _scaleController.forward().then((_) => _scaleController.reverse());
+        return;
+      }
+      setState(() {
+        _currentCategory = _getCategoryName(WordCategory.values[DateTime.now().millisecondsSinceEpoch % WordCategory.values.length]);
+      });
+      _spinCount++;
+      final progress = _spinCount / _totalSpins;
+      final easedProgress = Curves.easeInOut.transform(progress);
+      final delay = (_initialDelay + ((_finalDelay - _initialDelay) * easedProgress)).round();
+      _categoryTimer = Timer(Duration(milliseconds: delay), updateCategory);
+    }
+    updateCategory();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Tiebreaker Category Selection')),
+      body: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            'Tiebreaker Round: All teams will play with the same category!',
+            style: Theme.of(context).textTheme.titleLarge,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 32),
+          GestureDetector(
+            onTap: (!_isSpinning && _selectedCategory == null) ? _spinCategories : null,
+            child: AnimatedBuilder(
+              animation: _scaleController,
+              builder: (context, child) {
+                return Transform.scale(
+                  scale: _scaleAnimation.value,
+                  child: Container(
+                    width: 300,
+                    height: 300,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.grey,
+                        width: 2,
+                      ),
+                    ),
+                    child: Center(
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 150),
+                        transitionBuilder: (Widget child, Animation<double> animation) {
+                          return FadeTransition(
+                            opacity: animation,
+                            child: child,
+                          );
+                        },
+                        child: Text(
+                          _currentCategory.isEmpty ? 'Tap to Spin' : _currentCategory,
+                          key: ValueKey<String>(_currentCategory),
+                          style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                                color: _currentCategory.isNotEmpty
+                                    ? _getCategoryColor(_getCategoryFromName(_currentCategory))
+                                    : Theme.of(context).colorScheme.primary,
+                              ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 40),
+          Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: AnimatedOpacity(
+              opacity: _selectedCategory != null ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 300),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.arrow_forward),
+                      label: const Text('Start Tiebreaker'),
+                      onPressed: _selectedCategory != null
+                          ? () {
+                              // Set the tiebreaker category in game state
+                              ref.read(gameStateProvider.notifier).setTiebreakerCategory(_selectedCategory!);
+                              // Navigate to the first team's role assignment
+                              Navigator.of(context).pushReplacement(
+                                MaterialPageRoute(
+                                  builder: (context) => RoleAssignmentScreen(
+                                    teamIndex: widget.tiebreakerTeams[0],
+                                    roundNumber: widget.roundNumber,
+                                    turnNumber: 1,
+                                    category: _selectedCategory!,
+                                  ),
+                                ),
+                              );
+                            }
+                          : null,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

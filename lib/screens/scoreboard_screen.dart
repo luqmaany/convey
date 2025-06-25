@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/game_state_provider.dart';
 import 'category_selection_screen.dart';
 import 'package:convey/widgets/team_color_button.dart';
+import 'role_assignment_screen.dart';
+import 'category_selection_screen.dart' show TiebreakerCategorySelectionScreen;
 
 class ScoreboardScreen extends ConsumerWidget {
   final int roundNumber;
@@ -17,6 +19,31 @@ class ScoreboardScreen extends ConsumerWidget {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );
+    }
+
+    final isTiebreaker = gameState.isTiebreaker;
+    final tiebreakerTeams = gameState.tiebreakerTeams;
+
+    // Detect if this is a repeated tiebreaker (i.e., previous round was also a tiebreaker with a subset of teams)
+    // We'll show the previous tiebreaker round's scores for the current tiebreaker teams
+    List<int>? previousTiebreakerTeams;
+    Map<int, int>? previousTiebreakerScores;
+    if (isTiebreaker && roundNumber > 1) {
+      // Find the previous round's tiebreaker teams and their scores
+      // Look back in the turnHistory for the previous round
+      final prevRound = roundNumber - 1;
+      // Find which teams played in the previous round (those with a turn in prevRound)
+      final prevTeams = <int>{};
+      final prevScores = <int, int>{};
+      for (final turn in gameState.turnHistory.where((t) => t.roundNumber == prevRound)) {
+        prevTeams.add(turn.teamIndex);
+        prevScores[turn.teamIndex] = (prevScores[turn.teamIndex] ?? 0) + turn.score;
+      }
+      // Only show if the previous tiebreaker teams are a superset of the current tiebreaker teams
+      if (prevTeams.length > tiebreakerTeams.length && tiebreakerTeams.every((t) => prevTeams.contains(t))) {
+        previousTiebreakerTeams = tiebreakerTeams;
+        previousTiebreakerScores = { for (var t in tiebreakerTeams) t: prevScores[t] ?? 0 };
+      }
     }
 
     // Find each team's score for this round
@@ -57,8 +84,14 @@ class ScoreboardScreen extends ConsumerWidget {
     final currRanks = getRankings(totalScoresCurr);
 
     // Sort team indices by total score (descending)
-    final sortedTeamIndices = List.generate(teamsCount, (i) => i)
-      ..sort((a, b) => totalScoresCurr[b].compareTo(totalScoresCurr[a]));
+    List<int> sortedTeamIndices;
+    if (isTiebreaker) {
+      sortedTeamIndices = List<int>.from(tiebreakerTeams)
+        ..sort((a, b) => totalScoresCurr[b].compareTo(totalScoresCurr[a]));
+    } else {
+      sortedTeamIndices = List.generate(teamsCount, (i) => i)
+        ..sort((a, b) => totalScoresCurr[b].compareTo(totalScoresCurr[a]));
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -70,11 +103,81 @@ class ScoreboardScreen extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              'Round $roundNumber',
-              style: Theme.of(context).textTheme.headlineMedium,
-              textAlign: TextAlign.center,
-            ),
+            if (isTiebreaker && previousTiebreakerTeams != null && previousTiebreakerScores != null) ...[
+              Text(
+                'Previous Tiebreaker Scores',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.blue),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                child: Column(
+                  children: previousTiebreakerTeams.map((teamIndex) {
+                    final playerNames = gameState.config.teams[teamIndex].join(' & ');
+                    final score = previousTiebreakerScores![teamIndex] ?? 0;
+                    return Container(
+                      margin: const EdgeInsets.symmetric(vertical: 4.0),
+                      padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 10.0),
+                      decoration: BoxDecoration(
+                        color: teamColors[gameState.config.teamColorIndices.length > teamIndex
+                                ? gameState.config.teamColorIndices[teamIndex]
+                                : teamIndex % teamColors.length].background,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: teamColors[gameState.config.teamColorIndices.length > teamIndex
+                                  ? gameState.config.teamColorIndices[teamIndex]
+                                  : teamIndex % teamColors.length].border,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              playerNames,
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: teamColors[gameState.config.teamColorIndices.length > teamIndex
+                                            ? gameState.config.teamColorIndices[teamIndex]
+                                            : teamIndex % teamColors.length].text,
+                                  ),
+                            ),
+                          ),
+                          Text(
+                            score.toString(),
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black,
+                                ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            if (isTiebreaker) ...[
+              Text(
+                'Tiebreaker Round',
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(color: Colors.red),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Only teams that reached the target score last round are playing. Highest score this round wins!',
+                style: Theme.of(context).textTheme.bodyLarge,
+                textAlign: TextAlign.center,
+              ),
+            ] else ...[
+              Text(
+                'Round $roundNumber',
+                style: Theme.of(context).textTheme.headlineMedium,
+                textAlign: TextAlign.center,
+              ),
+            ],
             const SizedBox(height: 16),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24.0),
@@ -190,21 +293,47 @@ class ScoreboardScreen extends ConsumerWidget {
               children: [
                 Expanded(
                   child: TeamColorButton(
-                    text: 'Next Round',
+                    text: isTiebreaker ? 'Next Tiebreaker Round' : 'Next Round',
                     icon: Icons.arrow_forward,
                     color: teamColors[2], // Green
                     onPressed: () {
-                      // Next round
                       final nextRound = roundNumber + 1;
-                      Navigator.of(context).pushReplacement(
-                        MaterialPageRoute(
-                          builder: (context) => CategorySelectionScreen(
-                            teamIndex: gameState.currentTeamIndex,
-                            roundNumber: nextRound,
-                            turnNumber: 1,
+                      if (isTiebreaker) {
+                        if (gameState.tiebreakerCategory == null && gameState.currentTeamIndex == tiebreakerTeams[0]) {
+                          // Only the first team in the tiebreaker round spins for the category
+                          Navigator.of(context).pushReplacement(
+                            MaterialPageRoute(
+                              builder: (context) => TiebreakerCategorySelectionScreen(
+                                roundNumber: nextRound,
+                                tiebreakerTeams: tiebreakerTeams,
+                              ),
+                            ),
+                          );
+                        } else {
+                          // All teams use the stored tiebreaker category
+                          Navigator.of(context).pushReplacement(
+                            MaterialPageRoute(
+                              builder: (context) => RoleAssignmentScreen(
+                                teamIndex: gameState.currentTeamIndex,
+                                roundNumber: nextRound,
+                                turnNumber: 1,
+                                category: gameState.tiebreakerCategory!,
+                              ),
+                            ),
+                          );
+                        }
+                      } else {
+                        // Normal round: go to category selection
+                        Navigator.of(context).pushReplacement(
+                          MaterialPageRoute(
+                            builder: (context) => CategorySelectionScreen(
+                              teamIndex: gameState.currentTeamIndex,
+                              roundNumber: nextRound,
+                              turnNumber: 1,
+                            ),
                           ),
-                        ),
-                      );
+                        );
+                      }
                     },
                   ),
                 ),

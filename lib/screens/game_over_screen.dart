@@ -10,11 +10,15 @@ class GameOverScreen extends ConsumerWidget {
     final gameState = ref.watch(gameStateProvider);
     if (gameState == null) return const SizedBox.shrink();
 
-    // Sort team indices by total score (descending)
-    final sortedTeamIndices = List.generate(
-        gameState.teamScores.length, (i) => i)
-      ..sort(
-          (a, b) => gameState.teamScores[b].compareTo(gameState.teamScores[a]));
+    // If tiebreakerTeams is not empty, only show those teams
+    List<int> sortedTeamIndices;
+    if (gameState.tiebreakerTeams.isNotEmpty) {
+      sortedTeamIndices = List<int>.from(gameState.tiebreakerTeams)
+        ..sort((a, b) => gameState.teamScores[b].compareTo(gameState.teamScores[a]));
+    } else {
+      sortedTeamIndices = List.generate(gameState.teamScores.length, (i) => i)
+        ..sort((a, b) => gameState.teamScores[b].compareTo(gameState.teamScores[a]));
+    }
 
     return Scaffold(
       appBar: AppBar(

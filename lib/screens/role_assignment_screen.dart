@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/game_setup_provider.dart';
+import '../services/game_state_provider.dart';
 import 'game_screen.dart';
 import 'word_lists_manager_screen.dart';
 import 'package:convey/widgets/team_color_button.dart';
@@ -45,7 +46,6 @@ class _RoleAssignmentScreenState extends ConsumerState<RoleAssignmentScreen>
         curve: Curves.easeInOut,
       ),
     );
-    // Automatically assign roles at start
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _assignRandomRoles();
     });
@@ -59,13 +59,15 @@ class _RoleAssignmentScreenState extends ConsumerState<RoleAssignmentScreen>
 
   void _assignRandomRoles() {
     final gameConfig = ref.read(gameSetupProvider);
+    final gameState = ref.read(gameStateProvider);
+    final currentTeamIndex = gameState?.currentTeamIndex ?? widget.teamIndex;
     final teams = gameConfig.teams;
 
-    if (teams.isEmpty || widget.teamIndex >= teams.length) {
+    if (teams.isEmpty || currentTeamIndex >= teams.length) {
       return;
     }
 
-    final team = teams[widget.teamIndex];
+    final team = teams[currentTeamIndex];
     if (team.length < 2) {
       return;
     }
@@ -106,9 +108,11 @@ class _RoleAssignmentScreenState extends ConsumerState<RoleAssignmentScreen>
 
     // Get the team color for the current team
     final gameConfig = ref.watch(gameSetupProvider);
-    final colorIndex = (gameConfig.teamColorIndices.length > widget.teamIndex)
-        ? gameConfig.teamColorIndices[widget.teamIndex]
-        : widget.teamIndex % teamColors.length;
+    final gameState = ref.watch(gameStateProvider);
+    final currentTeamIndex = gameState?.currentTeamIndex ?? widget.teamIndex;
+    final colorIndex = (gameConfig.teamColorIndices.length > currentTeamIndex)
+        ? gameConfig.teamColorIndices[currentTeamIndex]
+        : currentTeamIndex % teamColors.length;
     final teamColor = teamColors[colorIndex];
 
     if (_isTransitioning) {
@@ -156,7 +160,7 @@ class _RoleAssignmentScreenState extends ConsumerState<RoleAssignmentScreen>
                     Navigator.of(context).pushReplacement(
                       MaterialPageRoute(
                         builder: (context) => GameScreen(
-                          teamIndex: widget.teamIndex,
+                          teamIndex: currentTeamIndex,
                           roundNumber: widget.roundNumber,
                           turnNumber: widget.turnNumber,
                           category: widget.category,

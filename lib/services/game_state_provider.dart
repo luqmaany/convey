@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/game_state.dart';
 import '../models/game_config.dart';
+import '../screens/word_lists_manager_screen.dart';
 
 class GameStateNotifier extends StateNotifier<GameState?> {
   GameStateNotifier() : super(null);
@@ -16,6 +17,11 @@ class GameStateNotifier extends StateNotifier<GameState?> {
 
   void resetGame() {
     state = null;
+  }
+
+  void setTiebreakerCategory(WordCategory category) {
+    if (state == null) return;
+    state = state!.copyWith(tiebreakerCategory: category);
   }
 
   // Helper getters

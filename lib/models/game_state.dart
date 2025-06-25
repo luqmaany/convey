@@ -1,4 +1,5 @@
 import 'game_config.dart';
+import '../screens/word_lists_manager_screen.dart';
 
 enum PlayerRole { conveyor, guesser }
 
@@ -62,6 +63,9 @@ class GameState {
   final int currentTurn;
   final int currentTeamIndex;
   final bool isGameOver;
+  final bool isTiebreaker;
+  final List<int> tiebreakerTeams;
+  final WordCategory? tiebreakerCategory;
 
   GameState({
     required this.config,
@@ -71,6 +75,9 @@ class GameState {
     required this.currentTurn,
     required this.currentTeamIndex,
     required this.isGameOver,
+    this.isTiebreaker = false,
+    this.tiebreakerTeams = const [],
+    this.tiebreakerCategory,
   });
 
   GameState.initial(GameConfig config)
@@ -80,7 +87,10 @@ class GameState {
         currentRound = 1,
         currentTurn = 1,
         currentTeamIndex = 0,
-        isGameOver = false;
+        isGameOver = false,
+        isTiebreaker = false,
+        tiebreakerTeams = const [],
+        tiebreakerCategory = null;
 
   GameState copyWith({
     GameConfig? config,
@@ -90,6 +100,9 @@ class GameState {
     int? currentTurn,
     int? currentTeamIndex,
     bool? isGameOver,
+    bool? isTiebreaker,
+    List<int>? tiebreakerTeams,
+    WordCategory? tiebreakerCategory,
   }) {
     return GameState(
       config: config ?? this.config,
@@ -99,13 +112,37 @@ class GameState {
       currentTurn: currentTurn ?? this.currentTurn,
       currentTeamIndex: currentTeamIndex ?? this.currentTeamIndex,
       isGameOver: isGameOver ?? this.isGameOver,
+      isTiebreaker: isTiebreaker ?? this.isTiebreaker,
+      tiebreakerTeams: tiebreakerTeams ?? this.tiebreakerTeams,
+      tiebreakerCategory: tiebreakerCategory ?? this.tiebreakerCategory,
     );
   }
 
   // Helper methods
-  bool isLastTeam() => currentTeamIndex == config.teams.length - 1;
+  bool isLastTeam() {
+    if (!isTiebreaker) {
+      return currentTeamIndex == config.teams.length - 1;
+    } else {
+      // In tiebreaker, only tiebreakerTeams play
+      return tiebreakerTeams.indexOf(currentTeamIndex) == tiebreakerTeams.length - 1;
+    }
+  }
 
-  int getNextTeamIndex() => isLastTeam() ? 0 : currentTeamIndex + 1;
+  int getNextTeamIndex() {
+    if (!isTiebreaker) {
+      return isLastTeam() ? 0 : currentTeamIndex + 1;
+    } else {
+      // In tiebreaker, cycle through tiebreakerTeams only
+      int idx = tiebreakerTeams.indexOf(currentTeamIndex);
+      if (idx == -1) {
+        // If currentTeamIndex is not in tiebreakerTeams, start with the first one
+        return tiebreakerTeams.isNotEmpty ? tiebreakerTeams[0] : 0;
+      }
+      // Move to next team in tiebreakerTeams, or back to first if at the end
+      int nextIdx = (idx + 1) % tiebreakerTeams.length;
+      return tiebreakerTeams[nextIdx];
+    }
+  }
 
   int getNextRound() => isLastTeam() ? currentRound + 1 : currentRound;
 
@@ -113,29 +150,113 @@ class GameState {
 
   GameState advanceTurn(TurnRecord turnRecord) {
     final newTeamScores = List<int>.from(teamScores);
-    // Update the team's score with the disputed score
     newTeamScores[turnRecord.teamIndex] += turnRecord.score;
-
     final newTurnHistory = List<TurnRecord>.from(turnHistory)..add(turnRecord);
-
     final nextTeamIndex = getNextTeamIndex();
     final nextRound = getNextRound();
     final nextTurn = getNextTurn();
 
-    // Check if any team has reached the target score AND we're at the end of a round
-    final hasReachedTargetScore =
-        newTeamScores.any((score) => score >= config.targetScore);
-    final isEndOfRound = isLastTeam();
-    final isGameOver = hasReachedTargetScore && isEndOfRound;
-
-    return copyWith(
-      teamScores: newTeamScores,
-      turnHistory: newTurnHistory,
-      currentRound: nextRound,
-      currentTurn: nextTurn,
-      currentTeamIndex: nextTeamIndex,
-      isGameOver: isGameOver,
-    );
+    // Tiebreaker logic
+    if (!isTiebreaker) {
+      // Check if multiple teams reached or exceeded the target score in this round
+      final teamsReachedTarget = <int>[];
+      for (int i = 0; i < newTeamScores.length; i++) {
+        if (newTeamScores[i] >= config.targetScore) {
+          teamsReachedTarget.add(i);
+        }
+      }
+      final isEndOfRound = isLastTeam();
+      if (teamsReachedTarget.length > 1 && isEndOfRound) {
+        // Start tiebreaker: only these teams play, scores reset for them
+        final resetScores = List<int>.from(newTeamScores);
+        for (int i = 0; i < resetScores.length; i++) {
+          if (teamsReachedTarget.contains(i)) {
+            resetScores[i] = 0;
+          }
+        }
+        return copyWith(
+          teamScores: resetScores,
+          turnHistory: newTurnHistory,
+          currentRound: nextRound,
+          currentTurn: nextTurn,
+          currentTeamIndex: teamsReachedTarget[0], // Always start with first tiebreaker team
+          isGameOver: false,
+          isTiebreaker: true,
+          tiebreakerTeams: teamsReachedTarget,
+          tiebreakerCategory: null, // Reset category for new tiebreaker round
+        );
+      }
+      // Normal game over logic
+      final hasReachedTargetScore = newTeamScores.any((score) => score >= config.targetScore);
+      if (hasReachedTargetScore && isEndOfRound) {
+        return copyWith(
+          teamScores: newTeamScores,
+          turnHistory: newTurnHistory,
+          currentRound: nextRound,
+          currentTurn: nextTurn,
+          currentTeamIndex: nextTeamIndex,
+          isGameOver: true,
+        );
+      }
+      return copyWith(
+        teamScores: newTeamScores,
+        turnHistory: newTurnHistory,
+        currentRound: nextRound,
+        currentTurn: nextTurn,
+        currentTeamIndex: nextTeamIndex,
+      );
+    } else {
+      // In tiebreaker mode: only tiebreakerTeams play, winner is highest score after round
+      final isEndOfRound = isLastTeam();
+      if (isEndOfRound) {
+        // Find the tiebreaker winner(s)
+        int maxScore = 0;
+        for (final i in tiebreakerTeams) {
+          if (newTeamScores[i] > maxScore) maxScore = newTeamScores[i];
+        }
+        final winners = tiebreakerTeams.where((i) => newTeamScores[i] == maxScore).toList();
+        if (winners.length == 1) {
+          // Single winner, game over
+          return copyWith(
+            teamScores: newTeamScores,
+            turnHistory: newTurnHistory,
+            currentRound: nextRound,
+            currentTurn: nextTurn,
+            currentTeamIndex: winners[0],
+            isGameOver: true,
+            isTiebreaker: false,
+            tiebreakerTeams: winners,
+            tiebreakerCategory: null, // Reset category for new tiebreaker round
+          );
+        } else {
+          // Still tied, start another tiebreaker round with only tied teams
+          final resetScores = List<int>.from(newTeamScores);
+          for (int i = 0; i < resetScores.length; i++) {
+            if (winners.contains(i)) {
+              resetScores[i] = 0;
+            }
+          }
+          return copyWith(
+            teamScores: resetScores,
+            turnHistory: newTurnHistory,
+            currentRound: nextRound,
+            currentTurn: nextTurn,
+            currentTeamIndex: winners[0], // Always start with first tiebreaker team
+            isGameOver: false,
+            isTiebreaker: true,
+            tiebreakerTeams: winners,
+            tiebreakerCategory: null, // Reset category for new tiebreaker round
+          );
+        }
+      }
+      return copyWith(
+        teamScores: newTeamScores,
+        turnHistory: newTurnHistory,
+        currentRound: nextRound,
+        currentTurn: nextTurn,
+        currentTeamIndex: nextTeamIndex,
+      );
+    }
   }
 
   // Get statistics for a specific player

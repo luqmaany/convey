@@ -9,6 +9,7 @@ import 'category_selection_screen.dart';
 import 'scoreboard_screen.dart';
 import 'word_lists_manager_screen.dart';
 import 'package:convey/widgets/team_color_button.dart';
+import 'role_assignment_screen.dart';
 
 class TurnOverScreen extends ConsumerStatefulWidget {
   final int teamIndex;
@@ -183,39 +184,54 @@ class _TurnOverScreenState extends ConsumerState<TurnOverScreen> {
 
       ref.read(gameStateProvider.notifier).recordTurn(turnRecord);
 
-      // Navigate to next screen
-      final gameState = ref.read(gameStateProvider);
-      if (gameState == null) {
-        Navigator.of(context).popUntil((route) => route.isFirst);
-        return;
-      }
+      // Use post-frame callback to ensure state is updated before navigation
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final gameState = ref.read(gameStateProvider);
+        if (gameState == null) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+          return;
+        }
 
-      if (gameState.isGameOver) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => const GameOverScreen(),
-          ),
-        );
-      } else if (isLastTeamThisRound) {
-        // End of round: show scoreboard
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => ScoreboardScreen(
-              roundNumber: gameState.currentRound - 1,
+        if (gameState.isGameOver) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => const GameOverScreen(),
             ),
-          ),
-        );
-      } else {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => CategorySelectionScreen(
-              teamIndex: gameState.currentTeamIndex,
-              roundNumber: gameState.currentRound,
-              turnNumber: gameState.currentTurn,
+          );
+        } else if (isLastTeamThisRound) {
+          // End of round: show scoreboard
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => ScoreboardScreen(
+                roundNumber: gameState.currentRound - 1,
+              ),
             ),
-          ),
-        );
-      }
+          );
+        } else if (gameState.isTiebreaker && gameState.tiebreakerCategory != null) {
+          // In tiebreaker: go directly to next team's role assignment with the same category
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => RoleAssignmentScreen(
+                teamIndex: gameState.currentTeamIndex,
+                roundNumber: gameState.currentRound,
+                turnNumber: gameState.currentTurn,
+                category: gameState.tiebreakerCategory!,
+              ),
+            ),
+          );
+        } else {
+          // Normal round: go to category selection for next team
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => CategorySelectionScreen(
+                teamIndex: gameState.currentTeamIndex,
+                roundNumber: gameState.currentRound,
+                turnNumber: gameState.currentTurn,
+              ),
+            ),
+          );
+        }
+      });
     }
   }
 
